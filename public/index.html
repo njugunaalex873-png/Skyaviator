@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SkyAviator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
+    body { background: #08111F; color: #fff; min-height: 100vh; display: flex; flex-direction: column; }
+    .hidden { display: none !important; }
+    .auth-box { padding: 24px; max-width: 380px; margin: auto; width: 100%; background: #121F32; border-radius: 12px; }
+    .brand { font-size: 26px; font-weight: 900; text-align: center; margin-bottom: 20px; }
+    .brand span { color: #00E59B; }
+    input { width: 100%; padding: 12px; margin: 8px 0 16px; background: #192A40; border: 1px solid #23354E; color: #fff; border-radius: 8px; font-size: 16px; }
+    .btn { width: 100%; padding: 14px; background: #00E59B; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; color: #08111F; cursor: pointer; }
+    header { background: #121F32; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #23354E; }
+    .history { display: flex; gap: 6px; padding: 8px; background: #0B1626; overflow-x: auto; }
+    .pill { padding: 4px 8px; border-radius: 10px; font-size: 12px; font-weight: bold; background: #23354E; color: #FFC857; }
+    .canvas-box { position: relative; width: 100%; height: 260px; background: radial-gradient(circle, #101c2e, #08111F); }
+    canvas { width: 100%; height: 100%; }
+    .multiplier { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 50px; font-weight: 900; }
+    .deck { padding: 14px; background: #121F32; margin: 10px; border-radius: 10px; }
+    .deck-row { display: flex; gap: 8px; }
+    .btn-action { flex: 1; border: none; border-radius: 8px; font-weight: bold; font-size: 18px; color: #08111F; }
+    .drawer { position: fixed; top: 0; left: -260px; width: 250px; height: 100%; background: #121F32; z-index: 99; transition: 0.3s; padding: 20px; }
+    .drawer.open { transform: translateX(260px); }
+    .drawer li { padding: 14px 0; border-bottom: 1px solid #23354E; list-style: none; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <!-- 1. SIGN IN (APPEARS FIRST) -->
+  <div id="authScreen" class="auth-box" style="margin-top: 60px;">
+    <div class="brand">SKY<span>AVIATOR</span></div>
+    <div id="signInSection">
+      <input type="text" id="logUser" placeholder="Username or Phone">
+      <input type="password" id="logPass" placeholder="Password">
+      <button class="btn" onclick="signIn()">SIGN IN</button>
+      <p style="text-align: center; margin-top: 14px; font-size: 14px;" onclick="toggleAuth(true)">Don't have an account? <span style="color:#00E59B">Register</span></p>
+    </div>
+    <div id="regSection" class="hidden">
+      <input type="text" id="regName" placeholder="Full Name">
+      <input type="text" id="regUsername" placeholder="Username">
+      <input type="text" id="regPhone" placeholder="Phone Number">
+      <input type="email" id="regEmail" placeholder="Email">
+      <input type="date" id="regDob">
+      <input type="password" id="regPassword" placeholder="Password">
+      <div style="margin-bottom: 12px; font-size: 12px;"><input type="checkbox" id="regTerms" checked> I agree (18+ only)</div>
+      <button class="btn" onclick="register()">REGISTER</button>
+      <p style="text-align: center; margin-top: 14px; font-size: 14px;" onclick="toggleAuth(false)">Back to <span style="color:#00E59B">Sign In</span></p>
+    </div>
+  </div>
+
+  <!-- 2. GAME DASHBOARD -->
+  <div id="gameDashboard" class="hidden">
+    <header>
+      <button onclick="toggleDrawer()" style="background:none; border:none; color:#fff; font-size:24px;">☰</button>
+      <div class="brand" style="margin:0; font-size:18px;">SKY<span>AVIATOR</span></div>
+      <div style="font-weight:bold; color:#00E59B;" id="balanceText">KSh 0.00</div>
+    </header>
+
+    <div class="history" id="history"></div>
+
+    <div class="canvas-box">
+      <canvas id="cv"></canvas>
+      <div class="multiplier" id="multText">1.00x</div>
+    </div>
+
+    <div class="deck">
+      <div class="deck-row">
+        <input type="number" id="betAmt" value="100" style="margin:0; width:40%;">
+        <button id="actionBtn" class="btn-action" style="background:#00E59B;" onclick="handleAction()">BET</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. DRAWER MENU -->
+  <div class="drawer" id="sideDrawer">
+    <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
+      <h3>Menu</h3>
+      <button onclick="toggleDrawer()" style="background:none; border:none; color:#fff; font-size:20px;">✕</button>
+    </div>
+    <ul>
+      <li onclick="depositPrompt()">💳 Deposit (M-Pesa)</li>
+      <li onclick="withdrawPrompt()">🏧 Withdraw</li>
+      <li onclick="alert('SkyAviator: Helpline 0800-723253. 18+ only.')">🛡️ Responsible Gambling</li>
+      <li onclick="signOut()" style="color:#FF4565;">🚪 Sign Out</li>
+    </ul>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let socket, state = 'WAITING', myBet = false, cashed = false;
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    let progress = 0;
+
+    function resize() { cv.width = cv.parentElement.clientWidth; cv.height = cv.parentElement.clientHeight; }
+    window.onload = () => { resize(); checkSession(); };
+
+    async function checkSession() {
+      const res = await fetch('/api/user/me');
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('gameDashboard').classList.remove('hidden');
+        document.getElementById('balanceText').innerText = 'KSh ' + data.balanceKsh;
+        connectSocket();
+        loadHistory();
+      }
+    }
+
+    async function signIn() {
+      const res = await fetch('/api/auth/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: document.getElementById('logUser').value, password: document.getElementById('logPass').value })
+      });
+      const d = await res.json();
+      if (d.success) checkSession(); else alert(d.message);
+    }
+
+    async function register() {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: document.getElementById('regName').value,
+          username: document.getElementById('regUsername').value,
+          phoneNumber: document.getElementById('regPhone').value,
+          email: document.getElementById('regEmail').value,
+          dateOfBirth: document.getElementById('regDob').value,
+          password: document.getElementById('regPassword').value,
+          acceptTerms: document.getElementById('regTerms').checked
+        })
+      });
+      const d = await res.json();
+      alert(d.message);
+      if (d.success) toggleAuth(false);
+    }
+
+    function toggleAuth(reg) {
+      document.getElementById('signInSection').className = reg ? 'hidden' : '';
+      document.getElementById('regSection').className = reg ? '' : 'hidden';
+    }
+
+    function connectSocket() {
+      socket = io();
+      socket.on('round_waiting', (d) => {
+        state = 'WAITING'; progress = 0;
+        document.getElementById('multText').innerText = d.countdown + 's';
+        document.getElementById('multText').style.color = '#fff';
+        if (!myBet) setBtn('BET', '#00E59B', false);
+      });
+      socket.on('round_started', () => {
+        state = 'FLYING';
+        if (myBet && !cashed) setBtn('CASH OUT', '#FFC857', false);
+      });
+      socket.on('round_tick', (d) => {
+        document.getElementById('multText').innerText = d.multiplier.toFixed(2) + 'x';
+        progress = Math.min((d.multiplier - 1) / 5, 1);
+      });
+      socket.on('round_crashed', (d) => {
+        state = 'CRASHED';
+        document.getElementById('multText').innerText = d.crashMultiplier.toFixed(2) + 'x';
+        document.getElementById('multText').style.color = '#FF4565';
+        myBet = false; cashed = false;
+        setBtn('BET', '#00E59B', false);
+        loadHistory();
+        checkSession();
+      });
+    }
+
+    function setBtn(txt, col, dis) {
+      const b = document.getElementById('actionBtn');
+      b.innerText = txt; b.style.background = col; b.disabled = dis;
+    }
+
+    function handleAction() {
+      if (state === 'WAITING' && !myBet) {
+        socket.emit('place_bet', { amountKsh: document.getElementById('betAmt').value }, (r) => {
+          if (r.success) { myBet = true; cashed = false; setBtn('WAITING...', '#192A40', true); checkSession(); }
+          else alert(r.message);
+        });
+      } else if (state === 'FLYING' && myBet && !cashed) {
+        socket.emit('cash_out', (r) => {
+          if (r.success) { cashed = true; setBtn('WON KSh ' + r.wonKsh, '#192A40', true); checkSession(); }
+        });
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (state === 'FLYING') {
+        const x = 30 + (cv.width - 60) * progress;
+        const y = (cv.height - 30) - Math.pow(progress, 1.4) * (cv.height - 60);
+        ctx.strokeStyle = '#00E59B'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(30, cv.height - 30);
+        ctx.quadraticCurveTo(30 + (x - 30) / 2, cv.height - 30, x, y);
+        ctx.stroke();
+        ctx.fillStyle = '#FF4565';
+        ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
+      }
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+
+    async function loadHistory() {
+      const res = await fetch('/api/game/history');
+      const d = await res.json();
+      document.getElementById('history').innerHTML = d.rounds.map(r => `<div class="pill">${r.crash_multiplier.toFixed(2)}x</div>`).join('');
+    }
+
+    function toggleDrawer() { document.getElementById('sideDrawer').classList.toggle('open'); }
+    async function depositPrompt() {
+      const amt = prompt("Enter deposit in KSh (M-Pesa):", "200");
+      if (amt) { await fetch('/api/payments/deposit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({amountKsh:amt})}); checkSession(); }
+    }
+    async function withdrawPrompt() {
+      const amt = prompt("Enter withdrawal in KSh:", "100");
+      if (amt) { await fetch('/api/payments/withdraw', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({amountKsh:amt})}); checkSession(); }
+    }
+    async function signOut() { await fetch('/api/auth/signout', { method:'POST' }); location.reload(); }
+  </script>
+</body>
+        </html>
